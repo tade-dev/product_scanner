@@ -1,0 +1,14 @@
+[
+  {
+    "barcode": "1234567890123",
+    "productName": "Coca-Cola",
+    "price": 1.49,
+    "image": "https://link.to/image.jpg"
+  },
+  {
+    "barcode": "9876543210987",
+    "productName": "Pepsi Max",
+    "price": 1.39,
+    "image": "https://link.to/pepsi.jpg"
+  }
+]
