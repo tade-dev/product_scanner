@@ -18,7 +18,7 @@ class Product {
 }
 
 class ProductService {
-  final String baseUrl = 'https://your-mockapi.com/products';
+  final String baseUrl = 'https://688de496a459d5566b1375d3.mockapi.io/api/v1/products';
 
   Future<Product?> fetchProduct(String barcode) async {
     final response = await http.get(Uri.parse('$baseUrl?barcode=$barcode'));
