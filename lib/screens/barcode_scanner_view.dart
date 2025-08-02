@@ -4,6 +4,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:product_scanner/api/product_api.dart';
+import 'package:product_scanner/screens/product_details_page.dart';
 
 class BarcodeScannerView extends StatefulWidget {
   const BarcodeScannerView({super.key});
@@ -40,6 +42,15 @@ class _BarcodeScannerViewState extends State<BarcodeScannerView> {
     });
 
     if (mounted) setState(() {});
+  }
+
+  void _resumeStream() async {
+    if (!_cameraController.value.isStreamingImages) {
+      await _cameraController.startImageStream(_processCameraImage);
+      setState(() {
+        _isDetecting = true;
+      });
+    }
   }
 
   InputImageRotation _getRotation() {
@@ -92,7 +103,23 @@ class _BarcodeScannerViewState extends State<BarcodeScannerView> {
     if (barcodes.isNotEmpty) {
       final barcode = barcodes.first;
       log('Detected barcode: ${barcode.rawValue}');
-      // Move to product info screen
+      if (barcodes.isNotEmpty) {
+        final barcode = barcodes.first;
+        _cameraController.stopImageStream();
+
+        final product = await ProductApi.fetchProduct(barcode.rawValue ?? '');
+
+        if (!mounted) return;
+
+        if (product != null) {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => ProductDetailPage(product: product),
+          ));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Product not found")));
+          _resumeStream();
+        }
+      }
     }
   }
 
