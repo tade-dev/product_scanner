@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:product_scanner/features/history/scan_history.dart';
+import 'package:product_scanner/features/scanner/barcode_scanner_view.dart';
 
 void main(List<String> args) async{
 
@@ -19,6 +20,9 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder();
+    return MaterialApp(
+      title: 'Product Scanner',
+      home: BarcodeScannerScreen()
+    );
   }
 }

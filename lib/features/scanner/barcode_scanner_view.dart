@@ -14,17 +14,102 @@ class BarcodeScannerScreen extends StatefulWidget {
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
 }
 
-class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
+class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
+    with TickerProviderStateMixin {
   late CameraController _cameraController;
   late BarcodeScanner _barcodeScanner;
+  late AnimationController _scanLineController;
+  late AnimationController _pulseController;
+  late AnimationController _cornerController;
+  late AnimationController _rippleController;
+  late AnimationController _flashController;
+  
+  late Animation<double> _scanLineAnimation;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _cornerAnimation;
+  late Animation<double> _rippleAnimation;
+  late Animation<Color?> _flashAnimation;
+  
   bool _isScanning = false;
   bool _isInitialized = false;
+  bool _isFlashOn = false;
+  bool _hasDetectedBarcode = false;
 
   @override
   void initState() {
     super.initState();
+    _initializeAnimations();
     _initializeCamera();
     _barcodeScanner = BarcodeScanner(formats: [BarcodeFormat.ean13, BarcodeFormat.upca]);
+  }
+
+  void _initializeAnimations() {
+    // Scanning line animation
+    _scanLineController = AnimationController(
+      duration: const Duration(milliseconds: 2000),
+      vsync: this,
+    );
+    _scanLineAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _scanLineController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Pulse animation for the scanner frame
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+    _pulseAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.1,
+    ).animate(CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Corner animation
+    _cornerController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _cornerAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _cornerController,
+      curve: Curves.elasticOut,
+    ));
+
+    // Ripple effect for successful scan
+    _rippleController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _rippleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _rippleController,
+      curve: Curves.easeOut,
+    ));
+
+    // Flash animation for scan feedback
+    _flashController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _flashAnimation = ColorTween(
+      begin: Colors.transparent,
+      end: Colors.green.withOpacity(0.3),
+    ).animate(_flashController);
+
+    // Start initial animations
+    _scanLineController.repeat(reverse: true);
+    _pulseController.repeat(reverse: true);
+    _cornerController.forward();
   }
 
   Future<void> _initializeCamera() async {
@@ -39,7 +124,6 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   InputImageRotation _getRotation() {
-    
     final orientations = {
       DeviceOrientation.portraitUp: InputImageRotation.rotation0deg,
       DeviceOrientation.landscapeLeft: InputImageRotation.rotation90deg,
@@ -74,9 +158,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       }
 
       final bytes = allBytes.done().buffer.asUint8List();
-
       final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
-
       final InputImageRotation rotation = _getRotation();
       final InputImageFormat format = _getImageFormat(image);
       
@@ -93,8 +175,14 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       if (barcodes.isNotEmpty) {
         final barcodeValue = barcodes.first.rawValue;
 
-        if (barcodeValue != null) {
-          HapticFeedback.mediumImpact();
+        if (barcodeValue != null && !_hasDetectedBarcode) {
+          _hasDetectedBarcode = true;
+          
+          // Trigger success animations
+          HapticFeedback.heavyImpact();
+          _flashController.forward().then((_) => _flashController.reverse());
+          _rippleController.forward();
+          
           await _cameraController.stopImageStream();
           await _handleProduct(barcodeValue);
         }
@@ -123,8 +211,21 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => ProductDetailScreen(product: product),
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              ProductDetailScreen(product: product),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(1.0, 0.0),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOut,
+              )),
+              child: child,
+            );
+          },
         ),
       ).then((_) => _resumeStream());
     } else {
@@ -135,22 +236,82 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   void _showNotFoundSheet(String barcode) {
     showModalBottomSheet(
       context: context,
-      builder: (_) => Container(
+      backgroundColor: Colors.transparent,
+      builder: (_) => AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("❌ Product not found", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text("Barcode: $barcode"),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _resumeStream();
-              },
-              child: const Text("Try Again"),
+            Container(
+              width: 50,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 48,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Product Not Found",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Barcode: $barcode",
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _resumeStream();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  "Try Again",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -158,11 +319,271 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   void _resumeStream() {
+    _hasDetectedBarcode = false;
+    _rippleController.reset();
     _cameraController.startImageStream(_processCameraImage);
+  }
+
+  void _toggleFlash() async {
+    setState(() {
+      _isFlashOn = !_isFlashOn;
+    });
+    await _cameraController.setFlashMode(
+      _isFlashOn ? FlashMode.torch : FlashMode.off,
+    );
+  }
+
+  Widget _buildScannerOverlay() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+      ),
+      child: Stack(
+        children: [
+          // Create hole for scanner area
+          Center(
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                border: Border.all(color: Colors.transparent),
+              ),
+            ),
+          ),
+          // Dark overlay with hole
+          Center(
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.transparent, width: 0),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.6),
+                    spreadRadius: 1000,
+                    blurRadius: 0,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannerFrame() {
+    return Center(
+      child: AnimatedBuilder(
+        animation: _pulseAnimation,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _pulseAnimation.value,
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.transparent, width: 2),
+              ),
+              child: Stack(
+                children: [
+                  // Animated corners
+                  AnimatedBuilder(
+                    animation: _cornerAnimation,
+                    builder: (context, child) {
+                      return Stack(
+                        children: [
+                          // Top-left corner
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            child: Transform.scale(
+                              scale: _cornerAnimation.value,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: const BoxDecoration(
+                                  border: Border(
+                                    top: BorderSide(color: Colors.green, width: 4),
+                                    left: BorderSide(color: Colors.green, width: 4),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Top-right corner
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Transform.scale(
+                              scale: _cornerAnimation.value,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: const BoxDecoration(
+                                  border: Border(
+                                    top: BorderSide(color: Colors.green, width: 4),
+                                    right: BorderSide(color: Colors.green, width: 4),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Bottom-left corner
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            child: Transform.scale(
+                              scale: _cornerAnimation.value,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: const BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(color: Colors.green, width: 4),
+                                    left: BorderSide(color: Colors.green, width: 4),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Bottom-right corner
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Transform.scale(
+                              scale: _cornerAnimation.value,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: const BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(color: Colors.green, width: 4),
+                                    right: BorderSide(color: Colors.green, width: 4),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  // Scanning line
+                  AnimatedBuilder(
+                    animation: _scanLineAnimation,
+                    builder: (context, child) {
+                      return Positioned(
+                        top: 280 * _scanLineAnimation.value - 1,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          height: 2,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                Colors.green.withOpacity(0.8),
+                                Colors.green,
+                                Colors.green.withOpacity(0.8),
+                                Colors.transparent,
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.green.withOpacity(0.6),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Ripple effect for successful scan
+                  AnimatedBuilder(
+                    animation: _rippleAnimation,
+                    builder: (context, child) {
+                      if (_rippleAnimation.value == 0) return const SizedBox.shrink();
+                      
+                      return Center(
+                        child: Container(
+                          width: 280 * _rippleAnimation.value,
+                          height: 280 * _rippleAnimation.value,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Colors.green.withOpacity(1 - _rippleAnimation.value),
+                              width: 3,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildControls() {
+    return Positioned(
+      bottom: 100,
+      left: 0,
+      right: 0,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Flash toggle button
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: IconButton(
+              onPressed: _toggleFlash,
+              icon: Icon(
+                _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                color: _isFlashOn ? Colors.yellow : Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+          // Gallery button
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: IconButton(
+              onPressed: () {
+                // Add gallery functionality
+              },
+              icon: const Icon(
+                Icons.photo_library,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _scanLineController.dispose();
+    _pulseController.dispose();
+    _cornerController.dispose();
+    _rippleController.dispose();
+    _flashController.dispose();
     _cameraController.dispose();
     _barcodeScanner.close();
     super.dispose();
@@ -171,24 +592,87 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan Product')),
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text(
+          'Scan Product',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
       body: _isInitialized
           ? Stack(
               children: [
-                CameraPreview(_cameraController),
-                Align(
-                  alignment: Alignment.center,
+                // Camera preview
+                Positioned.fill(
+                  child: CameraPreview(_cameraController),
+                ),
+                // Flash animation overlay
+                AnimatedBuilder(
+                  animation: _flashAnimation,
+                  builder: (context, child) {
+                    return Container(
+                      color: _flashAnimation.value,
+                    );
+                  },
+                ),
+                // Dark overlay with scanner hole
+                _buildScannerOverlay(),
+                // Scanner frame and animations
+                _buildScannerFrame(),
+                // Instructions
+                Positioned(
+                  top: 100,
+                  left: 0,
+                  right: 0,
                   child: Container(
-                    width: 240,
-                    height: 240,
+                    margin: const EdgeInsets.symmetric(horizontal: 40),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.green, width: 2),
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Point your camera at a barcode to scan',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
+                // Control buttons
+                _buildControls(),
               ],
             )
-          : const Center(child: CircularProgressIndicator()),
+          : Container(
+              color: Colors.black,
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'Initializing Camera...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 }
